@@ -1,0 +1,21 @@
+name: Verify free public GitHub runner
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/public-runner-preflight.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Verify free runner starts without secrets
+        run: |
+          echo "PUBLIC_GITHUB_RUNNER_OK"
+          echo "No OCI secrets or Oracle API requests were used."
