@@ -1,0 +1,61 @@
+name: Oracle Always Free capacity monitor
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */2 * * *'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: oracle-free-capacity-check
+  cancel-in-progress: false
+
+jobs:
+  capacity:
+    if: ${{ vars.OCI_CAPACITY_MONITOR_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OCI_CLI_TENANCY: ${{ secrets.OCI_MONITOR_TENANCY_OCID }}
+      OCI_MONITOR_USER: ${{ secrets.OCI_MONITOR_USER_OCID }}
+      OCI_MONITOR_FINGERPRINT: ${{ secrets.OCI_MONITOR_FINGERPRINT }}
+      OCI_MONITOR_PRIVATE_KEY: ${{ secrets.OCI_MONITOR_PRIVATE_KEY }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout public monitoring code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Prepare isolated signing key configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in OCI_CLI_TENANCY OCI_MONITOR_USER OCI_MONITOR_FINGERPRINT OCI_MONITOR_PRIVATE_KEY; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing secret $name"
+              exit 1
+            fi
+          done
+          umask 077
+          KEY_FILE="$RUNNER_TEMP/oci-monitor-signing-key.pem"
+          CONFIG_FILE="$RUNNER_TEMP/oci-monitor-config"
+          printf '%s\n' "$OCI_MONITOR_PRIVATE_KEY" > "$KEY_FILE"
+          printf '[DEFAULT]\nuser=%s\ntenancy=%s\nfingerprint=%s\nkey_file=%s\nregion=us-sanjose-1\n' \
+            "$OCI_MONITOR_USER" "$OCI_CLI_TENANCY" "$OCI_MONITOR_FINGERPRINT" "$KEY_FILE" > "$CONFIG_FILE"
+          chmod 600 "$KEY_FILE" "$CONFIG_FILE"
+          echo "OCI_CLI_CONFIG_FILE=$CONFIG_FILE" >> "$GITHUB_ENV"
+
+      - name: Install pinned Oracle CLI
+        run: python -m pip install --disable-pip-version-check --quiet 'oci-cli==3.95.1'
+
+      - name: Check availability (never launch a VM)
+        run: python scripts/monitor_capacity.py
