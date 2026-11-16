@@ -58,13 +58,19 @@ def query_capacity(tenancy, shape, request):
         raise MonitorError(f"OCI CLI exited {result.returncode} while checking {shape}; verify key and permissions")
     try:
         entries = json.loads(result.stdout)["data"]["shape-availabilities"]
-        matches = [entry for entry in entries if entry.get("instance-shape") == request["instanceShape"]
-                   and ("instanceShapeConfig" not in request or
-                        (entry.get("instance-shape-config") or {}).get("ocpus") == request["instanceShapeConfig"]["ocpus"]
-                        and (entry.get("instance-shape-config") or {}).get("memory-in-gbs") == request["instanceShapeConfig"]["memoryInGBs"])]
-        if len(matches) != 1:
-            raise ValueError("wrong number of shape results")
-        entry = matches[0]
+        if len(entries) != 1:
+            raise ValueError("expected one response for one requested configuration")
+        entry = entries[0]
+        if entry.get("instance-shape") != request["instanceShape"]:
+            raise ValueError("unexpected shape in response")
+        # OCI may omit shape configuration in the report. If present,
+        # validate it rather than trusting a response for the wrong size.
+        expected = request.get("instanceShapeConfig")
+        actual = entry.get("instance-shape-config") or {}
+        if expected and actual:
+            for field, target in (("ocpus", expected["ocpus"]), ("memory-in-gbs", expected["memoryInGBs"])):
+                if field in actual and float(actual[field]) != float(target):
+                    raise ValueError("unexpected shape configuration")
         status = entry["availability-status"]
         if status not in ALLOWED:
             raise ValueError("unknown capacity status")
